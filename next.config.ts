@@ -1,7 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
@@ -11,6 +10,12 @@ const nextConfig: NextConfig = {
         as: "*.css",
       },
     },
+  },
+  images: {
+    // Fotos subidas al Storage de Supabase
+    remotePatterns: [{ protocol: "https", hostname: "*.supabase.co" }],
+    // Solo para pruebas locales sin Supabase en la nube
+    unoptimized: process.env.IMAGES_UNOPTIMIZED === "1",
   },
 };
 

@@ -1,26 +1,55 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* Colores y fuentes de Casa D'Or. Cambie aquí y se actualiza todo el sitio. */
+@theme {
+  --color-crema: #fbf8f2;
+  --color-arena: #f5eee1;
+  --color-lino: #efe6d4;
+  --color-linea: #e6dccb;
+  --color-borde: #d8ccb6;
+  --color-tinta: #1c1a17;
+  --color-texto: #4a4540;
+  --color-suave: #5c554c;
+  --color-oro: #8a6a1f;
+  --color-oro-claro: #c9a54c;
+  --color-blanco: #fffdf9;
+
+  --font-serif: var(--font-playfair), Georgia, serif;
+  --font-sans: var(--font-jost), system-ui, sans-serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--color-crema);
+  color: var(--color-tinta);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a:hover {
+  color: var(--color-oro);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-oro);
+  outline-offset: 2px;
+}
+
+details > summary {
+  list-style: none;
+  cursor: pointer;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}
+details > summary::after {
+  content: "+";
+  float: right;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+details[open] > summary::after {
+  content: "−";
 }
