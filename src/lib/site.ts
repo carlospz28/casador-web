@@ -2,7 +2,12 @@
 
 export const site = {
   name: "Casa D'Or",
-  url: process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
+  // En Vercel toma sola la dirección de producción; con dominio propio se pone NEXT_PUBLIC_SITE_URL.
+  url:
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    (process.env.NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL}`
+      : "http://localhost:3000"),
   description:
     "Manillas con balines de oro 18K ley 750, tejidas a mano en Fusagasugá, Colombia. Con certificado de autenticidad y envío a todo el país.",
   whatsapp: "573158149692",
