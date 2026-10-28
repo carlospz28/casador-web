@@ -9,6 +9,8 @@ export const NAV = [
   { href: "/coleccion/regalos", label: "Regalos" },
 ];
 
+const SIMULADOR = { href: "/simulador", label: "Arma la tuya" };
+
 export function Header() {
   return (
     <>
@@ -18,8 +20,8 @@ export function Header() {
       <header className="sticky top-0 z-40 border-b border-linea bg-crema/95 backdrop-blur">
         <div className="mx-auto grid max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 py-3 sm:px-6 sm:py-4">
           <div className="flex items-center">
-            <MobileMenu links={NAV} />
-            <nav aria-label="Principal" className="hidden gap-6 text-sm uppercase tracking-[0.06em] lg:flex">
+            <MobileMenu links={[...NAV, SIMULADOR]} />
+            <nav aria-label="Principal" className="hidden gap-6 whitespace-nowrap text-sm uppercase tracking-[0.06em] lg:flex">
               {NAV.map((l) => (
                 <Link key={l.href} href={l.href} className="no-underline">
                   {l.label}
@@ -34,6 +36,12 @@ export function Header() {
             CASA D&apos;OR
           </Link>
           <div className="flex items-center justify-end gap-1">
+            <Link
+              href={SIMULADOR.href}
+              className="hidden whitespace-nowrap px-2 text-sm uppercase tracking-[0.06em] no-underline lg:inline"
+            >
+              {SIMULADOR.label}
+            </Link>
             <Link
               href="/nosotros"
               className="hidden px-2 text-sm uppercase tracking-[0.06em] no-underline lg:inline"

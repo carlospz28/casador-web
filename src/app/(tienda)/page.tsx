@@ -110,10 +110,10 @@ export default async function HomePage() {
             <h2 className="font-serif text-3xl font-normal sm:text-4xl">Del #3 al #8, tallados en oro 18K.</h2>
             <p className="text-[17px] leading-relaxed text-[#D9CDB6]">
               Cada balín tiene un tallado que refleja la luz. Elige un tamaño discreto para el día a día o uno grande
-              que se note. Si quieres un tamaño en especial, pídelo en tu manilla personalizada.
+              que se note. Combínalos como quieras y mira cómo queda antes de pedirla.
             </p>
-            <Link href="/coleccion/personalizadas" className="self-start text-sm uppercase tracking-[0.08em] text-[#F3EBDB] hover:text-oro-claro">
-              Personaliza la tuya
+            <Link href="/simulador" className="self-start text-sm uppercase tracking-[0.08em] text-[#F3EBDB] hover:text-oro-claro">
+              Arma la tuya en el simulador
             </Link>
           </div>
           <div className="relative aspect-[1272/832] min-w-0 flex-[1.4_1_480px] overflow-hidden">

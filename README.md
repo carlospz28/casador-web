@@ -25,6 +25,7 @@ Abra http://localhost:3000. El panel está en http://localhost:3000/admin.
 | `src/app/(tienda)/nosotros/page.tsx` | La historia de Casa D'Or |
 | `src/app/(tienda)/page.tsx` | Los textos del inicio, si quiere otros |
 | `src/app/globals.css` | Colores de la marca (bloque `@theme`) |
+| `src/lib/balines.ts` | Diámetro (mm) y peso (g) de cada balín del simulador. Falta el peso del #7 y del #8 |
 
 Las fotos del inicio y de las colecciones salen de las fotos de los productos: la primera foto de cada producto es la principal.
 
