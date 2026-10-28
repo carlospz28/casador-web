@@ -57,15 +57,28 @@ export function BeadDefs() {
 /** El dibujo de un balín (sirve también para las miniaturas). */
 export function BeadArt({
   size,
+  x,
+  y,
   spinRef,
   glintRef,
 }: {
   size: number;
+  x?: number;
+  y?: number;
   spinRef?: React.Ref<SVGRectElement>;
   glintRef?: React.Ref<SVGRectElement>;
 }) {
   return (
-    <svg viewBox="-50 -50 100 100" width={size} height={size} aria-hidden="true" focusable="false" className="block">
+    <svg
+      viewBox="-50 -50 100 100"
+      width={size}
+      height={size}
+      x={x}
+      y={y}
+      aria-hidden="true"
+      focusable="false"
+      className="block overflow-visible"
+    >
       <circle r="49" fill="url(#cd-oro)" />
       <g clipPath="url(#cd-esfera)">
         <rect ref={spinRef} x="-70" y="-130" width="140" height="260" fill="url(#cd-tallado)" />
@@ -88,10 +101,11 @@ type Props = {
   x: number; // centro del balín, en px de diseño
   fromX?: number; // de dónde entra (solo balines nuevos)
   leaving?: Leaving;
-  outX: number; // a dónde sale cuando se quita el último
+  outX: number; // a dónde sale cuando se quita por una punta
+  zoom: number; // escala actual del escenario (para que el rebote se note igual a cualquier tamaño)
   reduce: boolean;
   position: number;
-  onContact: (id: number) => void;
+  onContact: (id: number, fromLeft: boolean) => void;
   onGone: (id: number) => void;
   onRemove: (id: number) => void;
   register: (id: number, handle: BeadHandle | null) => void;
@@ -99,7 +113,10 @@ type Props = {
 
 const ENTER_MS = 1650;
 
-export function Bead({ id, n, mm, x, fromX, leaving, outX, reduce, position, onContact, onGone, onRemove, register }: Props) {
+const MOVE_MS = 900;
+const MOVE_EASE = "cubic-bezier(.45,0,.2,1)"; // la misma curva de la cámara, para que todo se mueva junto
+
+export function Bead({ id, n, mm, x, fromX, leaving, outX, zoom, reduce, position, onContact, onGone, onRemove, register }: Props) {
   const outer = useRef<HTMLButtonElement>(null);
   const inner = useRef<HTMLSpanElement>(null);
   const spin = useRef<SVGRectElement>(null);
@@ -176,31 +193,29 @@ export function Bead({ id, n, mm, x, fromX, leaving, outX, reduce, position, onC
 
     if (first && fromX !== undefined) {
       // La entrada: corre por el cordón, frena, toca al vecino y rebota un poquito
+      const fromLeft = fromX < x;
+      const bounce = Math.max(3.5, 1.6 / zoom) * (fromLeft ? -1 : 1);
       el.animate(
         [
           { transform: at(from), easing: "cubic-bezier(.38,.08,.22,1)" },
           { transform: at(x), offset: 0.82, easing: "ease-out" },
-          { transform: at(x + 3.5), offset: 0.89, easing: "ease-in-out" },
+          { transform: at(x + bounce), offset: 0.89, easing: "ease-in-out" },
           { transform: at(x) },
         ],
         { duration: ENTER_MS },
       );
-      spin.current?.animate([{ transform: "translateY(-78px)" }, { transform: "translateY(0)" }], {
-        duration: ENTER_MS * 0.84,
-        easing: "cubic-bezier(.3,.12,.22,1)",
-      });
-      later(ENTER_MS * 0.82, () => cb.current.onContact(id));
+      spin.current?.animate(
+        [{ transform: `translateY(${fromLeft ? 78 : -78}px)` }, { transform: "translateY(0)" }],
+        { duration: ENTER_MS * 0.84, easing: "cubic-bezier(.3,.12,.22,1)" },
+      );
+      later(ENTER_MS * 0.82, () => cb.current.onContact(id, fromLeft));
       shine(ENTER_MS * 0.84);
     } else {
       const dist = x - from;
-      const duration = Math.min(900, 420 + Math.abs(dist) * 1.1);
-      el.animate([{ transform: at(from) }, { transform: at(x) }], {
-        duration,
-        easing: "cubic-bezier(.45,0,.2,1)",
-      });
+      el.animate([{ transform: at(from) }, { transform: at(x) }], { duration: MOVE_MS, easing: MOVE_EASE });
       spin.current?.animate([{ transform: `translateY(${-dist * 0.3}px)` }, { transform: "translateY(0)" }], {
-        duration,
-        easing: "cubic-bezier(.45,0,.2,1)",
+        duration: MOVE_MS,
+        easing: MOVE_EASE,
       });
     }
     // `at` y `r` dependen de mm, que no cambia en la vida del balín
@@ -225,7 +240,7 @@ export function Bead({ id, n, mm, x, fromX, leaving, outX, reduce, position, onC
         easing: "cubic-bezier(.5,0,.75,0)",
         fill: "forwards",
       });
-      spin.current?.animate([{ transform: "translateY(0)" }, { transform: "translateY(50px)" }], {
+      spin.current?.animate([{ transform: "translateY(0)" }, { transform: `translateY(${outX > from ? 50 : -50}px)` }], {
         duration: 700,
         easing: "cubic-bezier(.5,0,.75,0)",
         fill: "forwards",

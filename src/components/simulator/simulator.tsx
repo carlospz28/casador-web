@@ -4,13 +4,20 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { BALINES, CORDONES, getBalin, type CordonId } from "@/lib/balines";
 import { formatNumber, site, whatsappLink } from "@/lib/site";
 import { Bead, BeadArt, BeadDefs, PX_PER_MM, type BeadHandle, type Leaving } from "./bead";
+import { CircleView, ringSize } from "./circle-view";
 
-type B = { id: number; n: number; fromX?: number; leaving?: Leaving; frozenX?: number };
+type Side = "left" | "right";
+type B = { id: number; n: number; fromX?: number; leaving?: Leaving; frozenX?: number; outSide?: Side };
+type Vista = "armando" | "terminada";
+type Escala = "real" | "cerca";
 
 const GAP = 2; // px de diseño entre balines (0,2 mm)
 const MAX_BALINES = 40;
 const MAX_MM = 170; // 17 cm de oro: más que eso ya no cabe en una muñeca
 const STAGGER = 230;
+const CSS_PX_PER_MM = 96 / 25.4;
+const CALIBRATION_KEY = "casador-px-por-mm";
+const CARD_MM = 53.98; // lado corto de una tarjeta débito, crédito o cédula
 
 const PRESETS = [
   { name: "Clásica", hint: "11 balines #4", seq: Array(11).fill(4) as number[] },
@@ -19,11 +26,25 @@ const PRESETS = [
   { name: "Para hombre", hint: "9 balines #6", seq: Array(9).fill(6) as number[] },
 ];
 
-/** Cuánto se acerca la cámara: lo más cerca posible sin que la manilla se salga. */
-function zoomFor(total: number, w: number) {
-  const max = w < 640 ? 1.1 : 1.6;
-  if (total <= 0 || w <= 0) return max;
-  return Math.min(max, (w - 56) / total);
+/**
+ * Escala del escenario (px de pantalla por px de diseño).
+ * "real": cada mm del balín mide un mm en la pantalla. "cerca": lo más grande que quepa.
+ * Si la manilla no cabe, se reduce y se avisa.
+ */
+function zoomFor(total: number, w: number, escala: Escala, pxPerMm: number) {
+  const max = escala === "real" ? pxPerMm / PX_PER_MM : w < 640 ? 1.1 : 1.6;
+  if (total <= 0 || w <= 0) return { k: max, fitted: false };
+  const fit = (w - 40) / total;
+  return fit < max ? { k: fit, fitted: true } : { k: max, fitted: false };
+}
+
+/** Píxeles por mm que suele tener cada tipo de pantalla, mientras el cliente no calibre. */
+function guessPxPerMm() {
+  const coarse = window.matchMedia("(pointer: coarse)").matches;
+  const short = Math.min(window.screen.width, window.screen.height);
+  if (coarse && short < 600) return 6; // celulares
+  if (coarse) return 5.2; // tabletas
+  return CSS_PX_PER_MM; // computadores
 }
 
 function mmOf(n: number) {
@@ -76,6 +97,12 @@ export function Simulator() {
   const [reduce, setReduce] = useState(false);
   const [notice, setNotice] = useState("");
   const [started, setStarted] = useState(false);
+  const [vista, setVista] = useState<Vista>("armando");
+  const [escala, setEscala] = useState<Escala>("real");
+  const [pxPerMm, setPxPerMm] = useState(CSS_PX_PER_MM);
+  const [calibrated, setCalibrated] = useState(false);
+  const [calibrando, setCalibrando] = useState(false);
+  const [height, setHeight] = useState(0);
 
   const stage = useRef<HTMLDivElement>(null);
   const widthRef = useRef(0);
@@ -85,6 +112,11 @@ export function Simulator() {
   const timers = useRef<number[]>([]);
   const initialized = useRef(false);
   const start = useRef(() => {});
+  const scaleRef = useRef({ escala: "real" as Escala, pxPerMm: CSS_PX_PER_MM });
+
+  useEffect(() => {
+    scaleRef.current = { escala, pxPerMm };
+  }, [escala, pxPerMm]);
 
   useEffect(() => {
     beadsRef.current = beads;
@@ -97,6 +129,7 @@ export function Simulator() {
     const ro = new ResizeObserver(([entry]) => {
       widthRef.current = entry.contentRect.width;
       setWidth(entry.contentRect.width);
+      setHeight(entry.contentRect.height);
       if (!initialized.current && entry.contentRect.width > 0) {
         initialized.current = true;
         start.current();
@@ -117,11 +150,12 @@ export function Simulator() {
 
   const active = beads.filter((b) => !b.leaving);
   const { xs, total } = layout(active);
-  const k = zoomFor(total, width);
+  const { k, fitted } = zoomFor(total, width, escala, pxPerMm);
   const ns = active.map((b) => b.n);
   const totalMm = ns.reduce((s, n) => s + mmOf(n), 0);
   const maxR = active.reduce((m, b) => Math.max(m, (mmOf(b.n) * PX_PER_MM) / 2), 0);
-  const outX = (width / 2 + 60) / k + total / 2 + 50;
+  const outRightX = (width / 2 + 60) / k + total / 2 + 50;
+  const outLeftX = -(width / 2 + 60) / k + total / 2 - 50;
   const grams = ns.every((n) => getBalin(n)?.gramos != null)
     ? ns.reduce((s, n) => s + (getBalin(n)?.gramos ?? 0), 0)
     : null;
@@ -132,9 +166,9 @@ export function Simulator() {
     timers.current = [];
   };
 
-  /** Agrega un balín al final del cordón. Devuelve false si ya no cabe. */
+  /** Agrega un balín por una punta del cordón. Devuelve false si ya no cabe. */
   const add = useCallback(
-    (n: number, silent = false) => {
+    (n: number, side: Side = "right", silent = false) => {
       const current = beadsRef.current.filter((b) => !b.leaving);
       const mm = current.reduce((s, b) => s + mmOf(b.n), 0) + mmOf(n);
       if (current.length >= MAX_BALINES || mm > MAX_MM) {
@@ -143,37 +177,47 @@ export function Simulator() {
       }
       const id = nextId.current++;
       setBeads((prev) => {
-        const next = [...prev.filter((b) => !b.leaving), { id, n }];
+        const act = prev.filter((b) => !b.leaving);
+        const next = side === "left" ? [{ id, n }, ...act] : [...act, { id, n }];
         const T = layout(next).total;
-        const z = zoomFor(T, widthRef.current);
+        const { k: z } = zoomFor(T, widthRef.current, scaleRef.current.escala, scaleRef.current.pxPerMm);
         const r = (mmOf(n) * PX_PER_MM) / 2;
-        const fromX = (widthRef.current / 2 + 30) / z + T / 2 + r;
-        return [...prev, { id, n, fromX }];
+        const edge = (widthRef.current / 2 + 30) / z;
+        const fromX = side === "left" ? -edge + T / 2 - r : edge + T / 2 + r;
+        const bead = { id, n, fromX };
+        return side === "left" ? [bead, ...prev] : [...prev, bead];
       });
-      beadsRef.current = [...beadsRef.current, { id, n }];
-      if (!silent) setNotice(`Agregaste un balín #${n}. Van ${current.length + 1}.`);
+      beadsRef.current = side === "left" ? [{ id, n }, ...beadsRef.current] : [...beadsRef.current, { id, n }];
+      if (!silent) {
+        setNotice(`Agregaste un balín #${n} a la ${side === "left" ? "izquierda" : "derecha"}. Van ${current.length + 1}.`);
+      }
       return true;
     },
     [],
   );
 
-  const markLeaving = useCallback((pick: (active: B[]) => B[], how: Leaving) => {
+  const markLeaving = useCallback((pick: (active: B[]) => B[], how: Leaving, outSide?: Side) => {
     setBeads((prev) => {
       const act = prev.filter((b) => !b.leaving);
       const { xs: pos } = layout(act);
       const ids = new Set(pick(act).map((b) => b.id));
-      return prev.map((b) => (ids.has(b.id) ? { ...b, leaving: how, frozenX: pos.get(b.id) } : b));
+      return prev.map((b) => (ids.has(b.id) ? { ...b, leaving: how, frozenX: pos.get(b.id), outSide } : b));
     });
   }, []);
 
-  const removeLast = useCallback(() => {
-    const act = beadsRef.current.filter((b) => !b.leaving);
-    if (!act.length) return;
-    const lastBead = act[act.length - 1];
-    markLeaving(() => [lastBead], "out");
-    beadsRef.current = beadsRef.current.map((b) => (b.id === lastBead.id ? { ...b, leaving: "out" } : b));
-    setNotice(`Quitaste un balín. Quedan ${act.length - 1}.`);
-  }, [markLeaving]);
+  /** Saca el balín de una punta: se va deslizando por el cordón. */
+  const removeEnd = useCallback(
+    (side: Side) => {
+      const act = beadsRef.current.filter((b) => !b.leaving);
+      if (!act.length) return;
+      const target = side === "left" ? act[0] : act[act.length - 1];
+      markLeaving(() => [target], "out", side);
+      beadsRef.current = beadsRef.current.map((b) => (b.id === target.id ? { ...b, leaving: "out" } : b));
+      setNotice(`Quitaste el balín de la ${side === "left" ? "izquierda" : "derecha"}. Quedan ${act.length - 1}.`);
+    },
+    [markLeaving],
+  );
+  const removeLast = useCallback(() => removeEnd("right"), [removeEnd]);
 
   const removeId = useCallback(
     (id: number) => {
@@ -199,7 +243,7 @@ export function Simulator() {
       const wait = replace && hadBeads && !reduce ? 320 : 0;
       const step = reduce ? 0 : STAGGER;
       seq.forEach((n, i) => {
-        timers.current.push(window.setTimeout(() => add(n, true), wait + i * step));
+        timers.current.push(window.setTimeout(() => add(n, "right", true), wait + i * step));
       });
     },
     [add, clearAll, reduce],
@@ -224,13 +268,21 @@ export function Simulator() {
     beadsRef.current = beadsRef.current.filter((b) => b.id !== id);
   }, []);
 
-  const onContact = useCallback((id: number) => {
+  // Cuando un balín llega, empuja un poquito a los vecinos (como bolitas de Newton)
+  const zoomRef = useRef(1);
+  const onContact = useCallback((id: number, fromLeft: boolean) => {
     const act = beadsRef.current.filter((b) => !b.leaving);
     const i = act.findIndex((b) => b.id === id);
-    for (let j = 1; j <= 3 && i - j >= 0; j++) {
-      handles.current.get(act[i - j].id)?.nudge(3.2 / j, (j - 1) * 45);
+    const push = Math.max(3.2, 1.6 / zoomRef.current);
+    for (let j = 1; j <= 3; j++) {
+      const neighbor = act[fromLeft ? i + j : i - j];
+      if (!neighbor) break;
+      handles.current.get(neighbor.id)?.nudge(((fromLeft ? -1 : 1) * push) / j, (j - 1) * 45);
     }
   }, []);
+  useEffect(() => {
+    zoomRef.current = k;
+  }, [k]);
 
   const register = useCallback((id: number, h: BeadHandle | null) => {
     if (h) handles.current.set(id, h);
@@ -240,6 +292,14 @@ export function Simulator() {
   // Primera carga: el diseño del enlace compartido o la Clásica
   useLayoutEffect(() => {
     start.current = () => {
+      let saved = 0;
+      try {
+        saved = Number(window.localStorage.getItem(CALIBRATION_KEY)) || 0;
+      } catch {
+        saved = 0;
+      }
+      setPxPerMm(saved > 1 ? saved : guessPxPerMm());
+      setCalibrated(saved > 1);
       const params = new URLSearchParams(window.location.search);
       const fromLink = (params.get("b") ?? "")
         .split(",")
@@ -249,6 +309,7 @@ export function Simulator() {
       const c = params.get("c");
       if (CORDONES.some((x) => x.id === c)) setCordon(c as CordonId);
       setStarted(true);
+      if (params.get("v") === "terminada") setVista("terminada");
       run(fromLink.length ? fromLink : PRESETS[0].seq, false);
     };
   }, [run]);
@@ -291,116 +352,243 @@ export function Simulator() {
 
   const rulerMm = Math.floor(total / PX_PER_MM);
 
+  // Manilla terminada: cuántos px por mm caben en el escenario
+  const ringBeads = active.map((b) => ({ id: b.id, mm: mmOf(b.n) }));
+  const ring = ringSize(ringBeads);
+  const ringMax = escala === "real" ? pxPerMm : 9;
+  const ringFit = Math.min((height - 70) / ring.h, (width - 6) / ring.w);
+  const ringPx = height > 0 && width > 0 ? Math.min(ringMax, ringFit) : ringMax;
+  const ringFitted = escala === "real" && ringPx < pxPerMm - 0.01;
+  const shownFitted = vista === "armando" ? fitted : ringFitted;
+
+  function saveCalibration() {
+    try {
+      window.localStorage.setItem(CALIBRATION_KEY, String(pxPerMm));
+    } catch {
+      // sin almacenamiento: la calibración dura mientras la página esté abierta
+    }
+    setCalibrated(true);
+    setCalibrando(false);
+    setEscala("real");
+    setNotice("Listo. Ahora los balines se ven de su tamaño real en tu pantalla.");
+  }
+
+  const seg = (on: boolean) =>
+    `min-h-10 px-3.5 text-[13px] uppercase tracking-[0.08em] transition-colors ${
+      on ? "bg-tinta text-crema" : "text-tinta hover:bg-lino"
+    }`;
+
   return (
     <div className="flex flex-col gap-8">
       <BeadDefs />
 
-      {/* Escenario */}
-      <div
-        ref={stage}
-        className="relative h-[230px] overflow-hidden sm:h-[320px]"
-        style={{
-          background:
-            "radial-gradient(120% 90% at 22% 12%, #57524b 0%, transparent 55%), radial-gradient(90% 70% at 85% 95%, #3d3934 0%, transparent 60%), linear-gradient(165deg, #3a3631 0%, #24211e 60%, #1b1916 100%)",
-        }}
-        role="img"
-        aria-label={
-          ns.length
-            ? `Manilla con cordón ${cord.name.toLowerCase()} y ${ns.length} balines: ${orderText(ns)}`
-            : "Cordón sin balines"
-        }
-      >
-        {/* Brillo de satín */}
+      <div className="flex flex-col gap-3">
+        {/* Barra del escenario */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex border border-tinta" role="group" aria-label="Vista">
+            <button type="button" aria-pressed={vista === "armando"} onClick={() => setVista("armando")} className={seg(vista === "armando")}>
+              Armando
+            </button>
+            <button type="button" aria-pressed={vista === "terminada"} onClick={() => setVista("terminada")} className={seg(vista === "terminada")}>
+              Terminada
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex border border-borde" role="group" aria-label="Tamaño">
+              <button type="button" aria-pressed={escala === "real"} onClick={() => setEscala("real")} className={seg(escala === "real")}>
+                Tamaño real
+              </button>
+              <button type="button" aria-pressed={escala === "cerca"} onClick={() => setEscala("cerca")} className={seg(escala === "cerca")}>
+                De cerca
+              </button>
+            </div>
+            <button
+              type="button"
+              aria-expanded={calibrando}
+              onClick={() => setCalibrando((v) => !v)}
+              className="text-[13px] underline underline-offset-4"
+            >
+              {calibrated ? "Calibrar de nuevo" : "Calibrar pantalla"}
+            </button>
+          </div>
+        </div>
+
+        {calibrando && (
+          <div className="flex flex-col gap-4 border border-linea bg-blanco p-5">
+            <p className="max-w-[560px] text-[15px] leading-relaxed">
+              Pon el <strong className="font-medium">lado corto</strong> de una tarjeta (débito, crédito o tu cédula)
+              sobre la línea dorada y mueve la barra hasta que la línea mida lo mismo que la tarjeta.
+            </p>
+            <div className="overflow-hidden">
+              <div
+                className="relative h-9 border-x-2 border-oro-claro"
+                style={{ width: CARD_MM * pxPerMm, maxWidth: "100%" }}
+                aria-hidden="true"
+              >
+                <span className="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 bg-oro-claro" />
+              </div>
+            </div>
+            <label htmlFor="calibracion" className="text-sm">
+              Ajuste
+            </label>
+            <input
+              id="calibracion"
+              type="range"
+              min={2.5}
+              max={9}
+              step={0.01}
+              value={pxPerMm}
+              onChange={(e) => setPxPerMm(Number(e.target.value))}
+              className="w-full max-w-[420px] accent-[#8a6a1f]"
+            />
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={saveCalibration}
+                className="min-h-11 bg-tinta px-6 text-sm uppercase tracking-[0.1em] text-crema hover:bg-[#33302b]"
+              >
+                Guardar
+              </button>
+              <button type="button" onClick={() => setCalibrando(false)} className="min-h-11 px-3 text-sm underline underline-offset-4">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Escenario */}
         <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 opacity-60"
+          ref={stage}
+          className={`relative overflow-hidden transition-[height] duration-500 ${
+            vista === "armando" ? "h-[230px] sm:h-[320px]" : "h-[480px] sm:h-[460px]"
+          }`}
           style={{
             background:
-              "linear-gradient(110deg, transparent 20%, rgba(255,255,255,.05) 32%, transparent 44%, transparent 60%, rgba(255,255,255,.04) 70%, transparent 80%)",
+              "radial-gradient(120% 90% at 22% 12%, #57524b 0%, transparent 55%), radial-gradient(90% 70% at 85% 95%, #3d3934 0%, transparent 60%), linear-gradient(165deg, #3a3631 0%, #24211e 60%, #1b1916 100%)",
           }}
-        />
-
-        <div
-          className="absolute left-1/2 top-[46%]"
-          style={{
-            transform: `scale(${k}) translateX(${-total / 2}px)`,
-            transition: reduce ? "none" : "transform 900ms cubic-bezier(.45,0,.2,1)",
-          }}
+          role="img"
+          aria-label={
+            ns.length
+              ? `Manilla ${vista === "terminada" ? "terminada" : "armándose"} con cordón ${cord.name.toLowerCase()} y ${ns.length} balines: ${orderText(ns)}`
+              : "Cordón sin balines"
+          }
         >
-          {/* Cordón */}
+          {/* Brillo de satín */}
           <div
             aria-hidden="true"
-            className="absolute left-[-4000px] top-[-7px] h-[14px] w-[8000px] rounded-full"
+            className="pointer-events-none absolute inset-0 opacity-60"
             style={{
-              background: `repeating-linear-gradient(118deg, ${shade(cord.hex, 0.18)} 0 2px, ${cord.hex} 2px 6px, ${shade(cord.hex, -0.45)} 6px 8px)`,
-              boxShadow: `0 5px 9px rgba(0,0,0,.45), inset 0 2px 1px ${shade(cord.hex, 0.3)}, inset 0 -2px 2px ${shade(cord.hex, -0.5)}`,
-              transition: "background 400ms",
+              background:
+                "linear-gradient(110deg, transparent 20%, rgba(255,255,255,.05) 32%, transparent 44%, transparent 60%, rgba(255,255,255,.04) 70%, transparent 80%)",
             }}
           />
 
-          {/* Regla en milímetros */}
-          {total > 0 && (
-            <svg
-              aria-hidden="true"
-              className="absolute left-0 overflow-visible"
-              style={{ top: maxR + 22 }}
-              width={total}
-              height={14}
+          {/* Vista armando: el cordón recto */}
+          <div
+            className={`absolute inset-0 transition-opacity duration-500 ${vista === "armando" ? "opacity-100" : "pointer-events-none opacity-0"}`}
+            aria-hidden={vista !== "armando"}
+          >
+            <div
+              className="absolute left-1/2 top-[46%]"
+              style={{
+                transform: `scale(${k}) translateX(${-total / 2}px)`,
+                transition: reduce ? "none" : "transform 900ms cubic-bezier(.45,0,.2,1)",
+              }}
             >
-              <line x1={0} x2={total} y1={0} y2={0} stroke="rgba(243,235,219,.4)" vectorEffect="non-scaling-stroke" />
-              {Array.from({ length: rulerMm + 1 }, (_, mm) => (
-                <line
-                  key={mm}
-                  x1={mm * PX_PER_MM}
-                  x2={mm * PX_PER_MM}
-                  y1={0}
-                  y2={mm % 10 === 0 ? 13 : mm % 5 === 0 ? 9 : 5}
-                  stroke={mm % 10 === 0 ? "rgba(243,235,219,.7)" : "rgba(243,235,219,.38)"}
-                  vectorEffect="non-scaling-stroke"
-                />
-              ))}
-            </svg>
+              {/* Cordón */}
+              <div
+                aria-hidden="true"
+                className="absolute left-[-6000px] top-[-6px] h-[12px] w-[12000px] rounded-full"
+                style={{
+                  background: `repeating-linear-gradient(118deg, ${shade(cord.hex, 0.18)} 0 2px, ${cord.hex} 2px 6px, ${shade(cord.hex, -0.45)} 6px 8px)`,
+                  boxShadow: `0 5px 9px rgba(0,0,0,.45), inset 0 2px 1px ${shade(cord.hex, 0.3)}, inset 0 -2px 2px ${shade(cord.hex, -0.5)}`,
+                  transition: "background 400ms",
+                }}
+              />
+
+              {/* Regla en milímetros */}
+              {total > 0 && (
+                <svg
+                  aria-hidden="true"
+                  className="absolute left-0 overflow-visible"
+                  style={{ top: maxR + Math.max(22, 10 / k) }}
+                  width={total}
+                  height={14}
+                >
+                  <line x1={0} x2={total} y1={0} y2={0} stroke="rgba(243,235,219,.4)" vectorEffect="non-scaling-stroke" />
+                  {Array.from({ length: rulerMm + 1 }, (_, mm) => (
+                    <line
+                      key={mm}
+                      x1={mm * PX_PER_MM}
+                      x2={mm * PX_PER_MM}
+                      y1={0}
+                      y2={(mm % 10 === 0 ? 13 : mm % 5 === 0 ? 9 : 5) * Math.max(1, 0.5 / k)}
+                      stroke={mm % 10 === 0 ? "rgba(243,235,219,.75)" : "rgba(243,235,219,.4)"}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  ))}
+                </svg>
+              )}
+
+              {beads.map((b) => {
+                const x = b.leaving ? (b.frozenX ?? 0) : (xs.get(b.id) ?? 0);
+                return (
+                  <Bead
+                    key={b.id}
+                    id={b.id}
+                    n={b.n}
+                    mm={mmOf(b.n)}
+                    x={x}
+                    fromX={b.fromX}
+                    leaving={b.leaving}
+                    outX={b.outSide === "left" ? outLeftX : outRightX}
+                    zoom={k}
+                    reduce={reduce}
+                    position={active.indexOf(b) + 1}
+                    onContact={onContact}
+                    onGone={onGone}
+                    onRemove={removeId}
+                    register={register}
+                  />
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Vista terminada: la manilla cerrada */}
+          {vista === "terminada" && (
+            <div className="absolute inset-0 flex items-center justify-center pt-4" aria-hidden="true">
+              <CircleView beads={ringBeads} hex={cord.hex} pxPerMm={ringPx} reduce={reduce} />
+            </div>
           )}
 
-          {beads.map((b) => {
-            const x = b.leaving ? (b.frozenX ?? 0) : (xs.get(b.id) ?? 0);
-            return (
-              <Bead
-                key={b.id}
-                id={b.id}
-                n={b.n}
-                mm={mmOf(b.n)}
-                x={x}
-                fromX={b.fromX}
-                leaving={b.leaving}
-                outX={outX}
-                reduce={reduce}
-                position={active.indexOf(b) + 1}
-                onContact={onContact}
-                onGone={onGone}
-                onRemove={removeId}
-                register={register}
-              />
-            );
-          })}
-        </div>
-
-        {/* Textos sobre el escenario */}
-        <p className="pointer-events-none absolute left-4 top-3.5 text-[11px] uppercase tracking-[0.16em] text-[#d9cdb6] sm:left-6 sm:top-5">
-          Vista de frente · medidas en mm
-        </p>
-        {ns.length > 0 && (
-          <p className="pointer-events-none absolute right-4 top-3.5 hidden text-[12px] text-[#bfb29a] sm:right-6 sm:top-5 sm:block">
-            Toca un balín para quitarlo
+          {/* Textos sobre el escenario */}
+          <p className="pointer-events-none absolute left-4 top-3.5 text-[11px] uppercase tracking-[0.16em] text-[#d9cdb6] sm:left-6 sm:top-5">
+            {escala === "real" ? (shownFitted ? "Reducida para que quepa" : "Tamaño real") : "Vista de cerca"}
+            {vista === "armando" ? " · regla en mm" : ""}
           </p>
-        )}
-        <p className="pointer-events-none absolute bottom-3.5 left-4 text-sm tabular-nums text-[#f3ebdb] sm:bottom-5 sm:left-6">
-          {ns.length === 0
-            ? started
-              ? "Agrega tu primer balín"
-              : ""
-            : `${ns.length} ${ns.length === 1 ? "balín" : "balines"} · ${formatNumber(totalMm)} mm de oro`}
-        </p>
+          {ns.length > 0 && vista === "armando" && (
+            <p className="pointer-events-none absolute right-4 top-3.5 hidden text-[12px] text-[#bfb29a] sm:right-6 sm:top-5 sm:block">
+              Toca un balín para quitarlo
+            </p>
+          )}
+          <p className="pointer-events-none absolute bottom-3.5 left-4 text-sm tabular-nums text-[#f3ebdb] sm:bottom-5 sm:left-6">
+            {ns.length === 0
+              ? started
+                ? "Agrega tu primer balín"
+                : ""
+              : `${ns.length} ${ns.length === 1 ? "balín" : "balines"} · ${formatNumber(totalMm)} mm de oro`}
+          </p>
+          {escala === "real" && !calibrated && started && (
+            <button
+              type="button"
+              onClick={() => setCalibrando(true)}
+              className="absolute bottom-4.5 right-6 hidden text-[12px] text-[#d9cdb6] underline underline-offset-4 hover:text-oro-claro sm:block"
+            >
+              ¿No se ve del tamaño real? Calibra
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-10 lg:grid-cols-[1.15fr_1fr]">
@@ -484,37 +672,32 @@ export function Simulator() {
         {/* Resumen */}
         <div className="flex min-w-0 flex-col gap-6 self-start border border-linea bg-arena p-6 sm:p-7">
           <div className="flex flex-col gap-3">
-            <p className="text-sm" id="cantidad-label">
-              Cantidad de balines
+            <p className="text-sm">
+              Agregar un balín <strong className="font-medium">#{calibre}</strong>
             </p>
-            <div className="flex items-stretch" role="group" aria-labelledby="cantidad-label">
+            <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={removeLast}
-                disabled={ns.length === 0}
-                aria-label="Quitar el último balín"
-                className="flex size-14 items-center justify-center border border-tinta text-2xl leading-none transition-colors hover:bg-tinta hover:text-crema disabled:border-borde disabled:text-borde disabled:hover:bg-transparent"
+                onClick={() => add(calibre, "left")}
+                className="flex min-h-14 items-center justify-center gap-2 bg-tinta px-3 text-sm uppercase tracking-[0.08em] text-crema transition-colors hover:bg-[#33302b]"
               >
-                −
+                <span aria-hidden="true" className="text-lg leading-none">←</span> A la izquierda
               </button>
-              <input
-                id="cantidad"
-                type="number"
-                inputMode="numeric"
-                min={0}
-                max={MAX_BALINES}
-                value={ns.length}
-                onChange={(e) => setCount(Number(e.target.value))}
-                aria-label="Cantidad de balines"
-                className="h-14 w-20 border-y border-tinta bg-blanco text-center text-xl tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-              />
               <button
                 type="button"
-                onClick={() => add(calibre)}
-                aria-label={`Agregar un balín #${calibre}`}
-                className="flex size-14 items-center justify-center bg-tinta text-2xl leading-none text-crema transition-colors hover:bg-[#33302b]"
+                onClick={() => add(calibre, "right")}
+                className="flex min-h-14 items-center justify-center gap-2 bg-tinta px-3 text-sm uppercase tracking-[0.08em] text-crema transition-colors hover:bg-[#33302b]"
               >
-                +
+                A la derecha <span aria-hidden="true" className="text-lg leading-none">→</span>
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+              <span className="text-suave">Quitar:</span>
+              <button type="button" onClick={() => removeEnd("left")} disabled={!ns.length} className="underline underline-offset-4 disabled:text-borde disabled:no-underline">
+                el de la izquierda
+              </button>
+              <button type="button" onClick={() => removeEnd("right")} disabled={!ns.length} className="underline underline-offset-4 disabled:text-borde disabled:no-underline">
+                el de la derecha
               </button>
               <button
                 type="button"
@@ -523,14 +706,31 @@ export function Simulator() {
                   clearAll();
                   setNotice("Quitaste todos los balines.");
                 }}
-                disabled={ns.length === 0}
-                className="ml-auto self-center text-sm underline underline-offset-4 disabled:text-borde disabled:no-underline"
+                disabled={!ns.length}
+                className="underline underline-offset-4 disabled:text-borde disabled:no-underline"
               >
-                Vaciar
+                todos
               </button>
             </div>
-            <p className="text-[13px] text-suave">
-              El + agrega un balín #{calibre}. Para mezclar tamaños, cambia el calibre antes de agregar.
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 border-t border-linea pt-5">
+            <label htmlFor="cantidad" className="text-sm">
+              Cantidad de balines
+            </label>
+            <input
+              id="cantidad"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={MAX_BALINES}
+              value={ns.length}
+              onChange={(e) => setCount(Number(e.target.value))}
+              className="h-11 w-20 border border-tinta bg-blanco text-center text-lg tabular-nums"
+            />
+            <p className="w-full text-[13px] text-suave">
+              Si escribes un número, completa con balines #{calibre} por la derecha. Para mezclar tamaños, cambia el
+              calibre antes de agregar.
             </p>
           </div>
 
