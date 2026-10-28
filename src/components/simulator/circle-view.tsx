@@ -112,11 +112,15 @@ export function CircleView({
   hex,
   pxPerMm,
   reduce,
+  selectedId,
+  onSelect,
 }: {
   beads: RingBead[];
   hex: string;
   pxPerMm: number;
   reduce: boolean;
+  selectedId: number | null;
+  onSelect: (id: number) => void;
 }) {
   const R = ringRadius(beads);
   const box = ringBox(beads);
@@ -140,7 +144,8 @@ export function CircleView({
       height={box.h * pxPerMm}
       className="block overflow-visible"
       style={{ transition: reduce ? "none" : "width 500ms, height 500ms" }}
-      aria-hidden="true"
+      role="group"
+      aria-label="Manilla terminada"
     >
       <defs>
         <filter id="cd-sombra-aro" x="-20%" y="-20%" width="140%" height="140%">
@@ -171,8 +176,25 @@ export function CircleView({
               transition: reduce ? "none" : "transform 700ms cubic-bezier(.45,0,.2,1)",
             }}
           >
-            <g className="cd-aparece" style={{ animationDelay: reduce ? "0ms" : `${i * 45}ms` }}>
-              <BeadArt size={b.mm} x={-b.mm / 2} y={R - b.mm / 2} />
+            <g
+              className="cd-aparece cursor-pointer outline-none"
+              style={{ animationDelay: reduce ? "0ms" : `${i * 45}ms` }}
+              role="button"
+              tabIndex={0}
+              aria-pressed={b.id === selectedId}
+              aria-label={`Balín ${i + 1} de ${placed.length}, ${b.mm} mm`}
+              onClick={() => onSelect(b.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelect(b.id);
+                }
+              }}
+            >
+              {b.id === selectedId && (
+                <circle cy={R} r={b.mm / 2 + 0.7} fill="none" stroke="var(--cd-marca, #F3EBDB)" strokeWidth={Math.max(0.35, 1.6 / pxPerMm)} />
+              )}
+              <BeadArt size={b.mm} x={-b.mm / 2} y={R - b.mm / 2} fine={b.mm * pxPerMm < 18} />
             </g>
           </g>
         ))}

@@ -1,9 +1,16 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, type CSSProperties } from "react";
+import { SPIN_FRAMES, facets, spinOf } from "./bead-geometry";
 
 /** 1 mm del balín = 10 px de diseño. El escenario escala todo junto. */
 export const PX_PER_MM = 10;
+
+/** El tallado ya calculado: un cuadro por cada paso del giro, más uno suave para balines chiquitos. */
+const SYMBOLS = [
+  ...Array.from({ length: SPIN_FRAMES }, (_, i) => ({ id: `cd-balin-${i}`, fine: false, facets: facets(spinOf(i)) })),
+  { id: "cd-balin-fino", fine: true, facets: facets(0, 0.6) },
+];
 
 /** Degradados y tallado compartidos por todos los balines (se dibujan una sola vez). */
 export function BeadDefs() {
@@ -17,25 +24,14 @@ export function BeadDefs() {
           <stop offset="0.7" stopColor="#A06E0A" />
           <stop offset="1" stopColor="#4F3304" />
         </radialGradient>
-        {/* Tallado diamantado: cortes en forma de hoja, en diagonal; cada corte tiene una cara que brilla y otra en sombra */}
-        <pattern id="cd-tallado" width="24" height="13" patternUnits="userSpaceOnUse" patternTransform="rotate(-58)">
-          <path d="M0 3.25 Q11.5 -2.95 23 3.25 Z" fill="#FFF2A6" opacity="0.95" />
-          <path d="M0 3.25 Q11.5 8.52 23 3.25 Z" fill="#4A2E02" opacity="0.68" />
-          <path d="M24 3.25 Q35.5 -2.95 47 3.25 Z" fill="#FFF2A6" opacity="0.95" />
-          <path d="M24 3.25 Q35.5 8.52 47 3.25 Z" fill="#4A2E02" opacity="0.68" />
-          <path d="M-24 3.25 Q-12.5 -2.95 -1 3.25 Z" fill="#FFF2A6" opacity="0.95" />
-          <path d="M-24 3.25 Q-12.5 8.52 -1 3.25 Z" fill="#4A2E02" opacity="0.68" />
-          <path d="M-12 9.75 Q-0.5 3.55 11 9.75 Z" fill="#FFF2A6" opacity="0.95" />
-          <path d="M-12 9.75 Q-0.5 15.02 11 9.75 Z" fill="#4A2E02" opacity="0.68" />
-          <path d="M12 9.75 Q23.5 3.55 35 9.75 Z" fill="#FFF2A6" opacity="0.95" />
-          <path d="M12 9.75 Q23.5 15.02 35 9.75 Z" fill="#4A2E02" opacity="0.68" />
-          <path d="M36 9.75 Q47.5 3.55 59 9.75 Z" fill="#FFF2A6" opacity="0.95" />
-          <path d="M36 9.75 Q47.5 15.02 59 9.75 Z" fill="#4A2E02" opacity="0.68" />
-        </pattern>
         <radialGradient id="cd-volumen" cx="40%" cy="34%" r="66%">
-          <stop offset="0.55" stopColor="#2A1600" stopOpacity="0" />
-          <stop offset="0.85" stopColor="#2A1600" stopOpacity="0.38" />
-          <stop offset="1" stopColor="#1E1000" stopOpacity="0.78" />
+          <stop offset="0.62" stopColor="#2A1600" stopOpacity="0" />
+          <stop offset="0.9" stopColor="#2A1600" stopOpacity="0.28" />
+          <stop offset="1" stopColor="#1E1000" stopOpacity="0.62" />
+        </radialGradient>
+        <radialGradient id="cd-volumen-fino" cx="40%" cy="34%" r="66%">
+          <stop offset="0.6" stopColor="#2A1600" stopOpacity="0" />
+          <stop offset="1" stopColor="#2A1600" stopOpacity="0.45" />
         </radialGradient>
         <radialGradient id="cd-reflejo" cx="50%" cy="50%" r="50%">
           <stop offset="0" stopColor="#FFFFFF" stopOpacity="0.95" />
@@ -49,6 +45,18 @@ export function BeadDefs() {
         <clipPath id="cd-esfera">
           <circle cx="0" cy="0" r="49" />
         </clipPath>
+        {SYMBOLS.map((s) => (
+          <symbol key={s.id} id={s.id} viewBox="-50 -50 100 100">
+            <circle r="49" fill="url(#cd-oro)" />
+            <g clipPath="url(#cd-esfera)">
+              {s.facets.map((f, i) => (
+                <path key={i} d={f.d} fill={f.fill} />
+              ))}
+              <circle r="49" fill={s.fine ? "url(#cd-volumen-fino)" : "url(#cd-volumen)"} />
+              <ellipse cx="-18" cy="-24" rx="11" ry="6" fill="url(#cd-reflejo)" transform="rotate(-30 -18 -24)" opacity="0.85" />
+            </g>
+          </symbol>
+        ))}
       </defs>
     </svg>
   );
@@ -59,13 +67,15 @@ export function BeadArt({
   size,
   x,
   y,
+  fine = false,
   spinRef,
   glintRef,
 }: {
   size: number;
   x?: number;
   y?: number;
-  spinRef?: React.Ref<SVGRectElement>;
+  fine?: boolean; // se ve de menos de ~18 px en pantalla
+  spinRef?: React.Ref<SVGUseElement>;
   glintRef?: React.Ref<SVGRectElement>;
 }) {
   return (
@@ -79,12 +89,8 @@ export function BeadArt({
       focusable="false"
       className="block overflow-visible"
     >
-      <circle r="49" fill="url(#cd-oro)" />
+      <use ref={spinRef} href={fine ? "#cd-balin-fino" : "#cd-balin-0"} x="-50" y="-50" width="100" height="100" />
       <g clipPath="url(#cd-esfera)">
-        <rect ref={spinRef} x="-70" y="-130" width="140" height="260" fill="url(#cd-tallado)" />
-        <circle r="49" fill="url(#cd-volumen)" />
-        <ellipse cx="-17" cy="-21" rx="13" ry="8" fill="url(#cd-reflejo)" transform="rotate(-30 -17 -21)" />
-        <ellipse cx="22" cy="27" rx="12" ry="4" fill="#FFE9A6" opacity="0.28" transform="rotate(-38 22 27)" />
         <rect ref={glintRef} x="-14" y="-80" width="28" height="160" fill="url(#cd-destello)" opacity="0" />
       </g>
     </svg>
@@ -99,15 +105,17 @@ type Props = {
   n: number;
   mm: number;
   x: number; // centro del balín, en px de diseño
-  fromX?: number; // de dónde entra (solo balines nuevos)
+  fromX?: number; // de dónde entra por una punta (solo balines nuevos)
+  drop?: boolean; // entra cayendo desde arriba (cuando se mete en medio)
+  selected?: boolean;
   leaving?: Leaving;
   outX: number; // a dónde sale cuando se quita por una punta
   zoom: number; // escala actual del escenario (para que el rebote se note igual a cualquier tamaño)
   reduce: boolean;
   position: number;
-  onContact: (id: number, fromLeft: boolean) => void;
+  onContact: (id: number, dir: "left" | "right" | "both") => void;
   onGone: (id: number) => void;
-  onRemove: (id: number) => void;
+  onSelect: (id: number) => void;
   register: (id: number, handle: BeadHandle | null) => void;
 };
 
@@ -116,15 +124,34 @@ const ENTER_MS = 1650;
 const MOVE_MS = 900;
 const MOVE_EASE = "cubic-bezier(.45,0,.2,1)"; // la misma curva de la cámara, para que todo se mueva junto
 
-export function Bead({ id, n, mm, x, fromX, leaving, outX, zoom, reduce, position, onContact, onGone, onRemove, register }: Props) {
+export function Bead({
+  id,
+  n,
+  mm,
+  x,
+  fromX,
+  drop,
+  selected,
+  leaving,
+  outX,
+  zoom,
+  reduce,
+  position,
+  onContact,
+  onGone,
+  onSelect,
+  register,
+}: Props) {
   const outer = useRef<HTMLButtonElement>(null);
   const inner = useRef<HTMLSpanElement>(null);
-  const spin = useRef<SVGRectElement>(null);
+  const spin = useRef<SVGUseElement>(null);
+  const spinRaf = useRef(0);
   const glint = useRef<SVGRectElement>(null);
   const last = useRef<number | null>(null);
   const timers = useRef<number[]>([]);
   const d = mm * PX_PER_MM;
   const r = d / 2;
+  const fine = d * zoom < 18;
   const at = (cx: number) => `translate(${cx - r}px, ${-r}px)`;
 
   // Callbacks siempre al día sin volver a disparar las animaciones
@@ -135,7 +162,11 @@ export function Bead({ id, n, mm, x, fromX, leaving, outX, zoom, reduce, positio
 
   useEffect(() => {
     const t = timers.current;
-    return () => t.forEach((h) => window.clearTimeout(h));
+    const raf = spinRaf;
+    return () => {
+      t.forEach((h) => window.clearTimeout(h));
+      cancelAnimationFrame(raf.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -157,6 +188,22 @@ export function Bead({ id, n, mm, x, fromX, leaving, outX, zoom, reduce, positio
 
   function later(ms: number, fn: () => void) {
     timers.current.push(window.setTimeout(fn, ms));
+  }
+
+  /** Gira el balín sobre el cordón cambiando de cuadro, frenando como el deslizamiento. */
+  function spinFor(frames: number, duration: number) {
+    const el = spin.current;
+    if (!el || reduce || fine) return;
+    cancelAnimationFrame(spinRaf.current);
+    const t0 = performance.now();
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - t0) / duration);
+      const eased = 1 - Math.pow(1 - p, 3);
+      const f = Math.round(frames * eased);
+      el.setAttribute("href", `#cd-balin-${(((f % SPIN_FRAMES) + SPIN_FRAMES) % SPIN_FRAMES)}`);
+      if (p < 1) spinRaf.current = requestAnimationFrame(tick);
+    };
+    spinRaf.current = requestAnimationFrame(tick);
   }
 
   function shine(delay: number) {
@@ -189,7 +236,7 @@ export function Bead({ id, n, mm, x, fromX, leaving, outX, zoom, reduce, positio
     }
     el.style.transform = at(x);
     last.current = x;
-    if (reduce || Math.abs(from - x) < 0.5) return;
+    if (reduce || (Math.abs(from - x) < 0.5 && !(first && drop))) return;
 
     if (first && fromX !== undefined) {
       // La entrada: corre por el cordón, frena, toca al vecino y rebota un poquito
@@ -204,19 +251,29 @@ export function Bead({ id, n, mm, x, fromX, leaving, outX, zoom, reduce, positio
         ],
         { duration: ENTER_MS },
       );
-      spin.current?.animate(
-        [{ transform: `translateY(${fromLeft ? 78 : -78}px)` }, { transform: "translateY(0)" }],
-        { duration: ENTER_MS * 0.84, easing: "cubic-bezier(.3,.12,.22,1)" },
-      );
-      later(ENTER_MS * 0.82, () => cb.current.onContact(id, fromLeft));
+      spinFor((fromLeft ? 1 : -1) * SPIN_FRAMES * 3, ENTER_MS * 0.84);
+      later(ENTER_MS * 0.82, () => cb.current.onContact(id, fromLeft ? "left" : "right"));
       shine(ENTER_MS * 0.84);
+    } else if (first && drop) {
+      // Meterlo en medio: los vecinos abren campo y el balín cae en su sitio
+      const lift = Math.max(90, 40 / zoom);
+      const bounce = Math.max(6, 3 / zoom);
+      const up = (dy: number) => `translate(${x - r}px, ${-r - dy}px)`;
+      el.animate(
+        [
+          { transform: up(lift), opacity: 0, easing: "cubic-bezier(.55,0,.9,.4)" },
+          { transform: at(x), opacity: 1, offset: 0.62, easing: "cubic-bezier(.2,.7,.4,1)" },
+          { transform: up(bounce), offset: 0.8, easing: "ease-in" },
+          { transform: at(x) },
+        ],
+        { duration: 820, delay: 260, fill: "backwards" },
+      );
+      later(260 + 820 * 0.62, () => cb.current.onContact(id, "both"));
+      shine(260 + 820 * 0.66);
     } else {
       const dist = x - from;
       el.animate([{ transform: at(from) }, { transform: at(x) }], { duration: MOVE_MS, easing: MOVE_EASE });
-      spin.current?.animate([{ transform: `translateY(${-dist * 0.3}px)` }, { transform: "translateY(0)" }], {
-        duration: MOVE_MS,
-        easing: MOVE_EASE,
-      });
+      spinFor(Math.round(-dist / 12), MOVE_MS);
     }
     // `at` y `r` dependen de mm, que no cambia en la vida del balín
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -240,11 +297,7 @@ export function Bead({ id, n, mm, x, fromX, leaving, outX, zoom, reduce, positio
         easing: "cubic-bezier(.5,0,.75,0)",
         fill: "forwards",
       });
-      spin.current?.animate([{ transform: "translateY(0)" }, { transform: `translateY(${outX > from ? 50 : -50}px)` }], {
-        duration: 700,
-        easing: "cubic-bezier(.5,0,.75,0)",
-        fill: "forwards",
-      });
+      spinFor((outX > from ? -1 : 1) * SPIN_FRAMES * 2, 700);
     } else {
       anim = inner.current!.animate(
         [
@@ -259,7 +312,12 @@ export function Bead({ id, n, mm, x, fromX, leaving, outX, zoom, reduce, positio
   }, [leaving]);
 
   // La posición la maneja el efecto de arriba (antes de pintar), no React.
-  const style: CSSProperties = { width: d, height: d };
+  const style: CSSProperties = {
+    width: d,
+    height: d,
+    outline: selected ? `${2 / zoom}px solid var(--cd-marca, #F3EBDB)` : undefined,
+    outlineOffset: selected ? `${3 / zoom}px` : undefined,
+  };
 
   return (
     <button
@@ -267,18 +325,20 @@ export function Bead({ id, n, mm, x, fromX, leaving, outX, zoom, reduce, positio
       type="button"
       tabIndex={leaving ? -1 : 0}
       disabled={Boolean(leaving)}
-      onClick={() => onRemove(id)}
-      aria-label={`Quitar el balín #${n} de la posición ${position}`}
+      onClick={() => onSelect(id)}
+      aria-pressed={Boolean(selected)}
+      aria-label={`Balín #${n}, posición ${position}`}
       className="group absolute left-0 top-0 cursor-pointer rounded-full p-0 focus-visible:outline-offset-4 disabled:cursor-default"
       style={style}
     >
       <span ref={inner} className="relative block size-full">
         <span
           aria-hidden="true"
-          className="absolute left-[6%] top-[62%] h-[52%] w-[88%] rounded-[50%] bg-[radial-gradient(closest-side,rgba(0,0,0,.55),transparent)]"
+          className="absolute left-[6%] top-[62%] h-[52%] w-[88%] rounded-[50%]"
+          style={{ background: "radial-gradient(closest-side, var(--cd-sombra, rgba(0,0,0,.55)), transparent)" }}
         />
         <span className="relative block transition-[filter] duration-200 group-hover:brightness-110">
-          <BeadArt size={d} spinRef={spin} glintRef={glint} />
+          <BeadArt size={d} fine={fine} spinRef={spin} glintRef={glint} />
         </span>
       </span>
     </button>
